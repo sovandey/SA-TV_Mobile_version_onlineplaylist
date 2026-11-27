@@ -2,7 +2,7 @@
 # SA-TV curated playlist. Edit this file on GitHub: add / remove channels.
 # group-title must be one of: Indian Bengali, Bangladesh, Hindi, Sports, FM Radio, Kids,
 # Same channel name on more than one line = backup links (app tries the next one automatically).
-#EXTINF:-1 tvg-id="ABPAnanda.in@SD" group-title="Indian Bengali",ABP Ananda
+#EXTINF:-1 tvg-id="ABPAnanda.in@SD" tvg-logo="https://static.vidgyor.com/player/account/abp/img/ABP-Ananda.png?lock=720x540" group-title="Indian Bengali",ABP Ananda
 https://d2l4ar6y3mrs4k.cloudfront.net/live-streaming/ananda-livetv/master.m3u8
 #EXTINF:-1 tvg-id="DDBangla.in@SD" tvg-logo="https://dtil.tmsimg.com/assets/s142778_ld_h15_aa.png?lock=720x540" group-title="Indian Bengali",DD Bangla
 https://d3qs3d2rkhfqrt.cloudfront.net/out/v1/7ff57cc9046b4c188b51a0d506f36e7f/index.m3u8
