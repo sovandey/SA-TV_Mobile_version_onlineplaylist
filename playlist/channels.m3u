@@ -1,6 +1,6 @@
 #EXTM3U
 # SA-TV curated playlist. Edit this file on GitHub: add / remove channels.
-# group-title must be one of: Indian Bengali, Bangladesh, Hindi, Sports, FM Radio, Kids
+# group-title must be one of: Indian Bengali, Bangladesh, Hindi, Sports, FM Radio, Kids, Test
 # Same channel name on more than one line = backup links (app tries the next one automatically).
 
 
