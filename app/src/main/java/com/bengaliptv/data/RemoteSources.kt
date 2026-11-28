@@ -39,7 +39,7 @@ object RemoteSources {
         null
     }
 
-    private fun cached(context: Context, key: String, urls: List<String>): String? {
+    private fun cached(context: Context, key: String, urls: List<String>, useCache: Boolean = true): String? {
         val file = File(context.cacheDir, "src_$key.txt")
         for (u in urls) {
             val text = fetch(u)
@@ -48,14 +48,14 @@ object RemoteSources {
                 return text
             }
         }
-        return if (file.exists()) runCatching { file.readText() }.getOrNull() else null
+        return if (useCache && file.exists()) runCatching { file.readText() }.getOrNull() else null
     }
 
     private fun raw(path: String) = "https://raw.githubusercontent.com/${BuildConfig.REPO}/HEAD/$path"
 
     /** playlist/config.json from your GitHub repo (cached for offline use). */
-    fun loadConfig(context: Context): RemoteConfig? {
-        val text = cached(context, "config", listOf(raw("playlist/config.json"))) ?: return null
+    fun loadConfig(context: Context, useCache: Boolean = true): RemoteConfig? {
+        val text = cached(context, "config", listOf(raw("playlist/config.json")), useCache) ?: return null
         return try {
             val o = org.json.JSONObject(text)
             val blocked = HashSet<String>()

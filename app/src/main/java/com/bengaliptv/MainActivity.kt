@@ -1,6 +1,14 @@
 package com.bengaliptv
 
+import android.Manifest
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.app.UiModeManager
+import android.content.ComponentName
+import android.content.pm.PackageManager
+import android.util.Rational
+import android.view.KeyEvent
+import android.widget.Toast
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -35,7 +43,15 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -70,9 +86,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -90,6 +115,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -111,6 +137,25 @@ private val categories = listOf(
     "Kids" to "🧸"
 )
 private val remoteGroups = setOf("Hindi", "Sports", "FM Radio", "Kids")
+
+// Shared with MainActivity (pop-up video window + TV remote keys)
+private var inPipMode by mutableStateOf(false)
+private var pipEligible = false
+private var pipRatio = 16f / 9f
+private var playerKeyHandler: ((Int) -> Boolean)? = null
+
+private data class QualityOption(val height: Int, val bitrate: Int, val group: TrackGroup, val index: Int)
+
+private fun qLabel(h: Int): String = when {
+    h >= 2160 -> "4K"
+    h >= 1440 -> "1440p"
+    else -> "${h}p"
+}
+
+private fun isTvDevice(context: Context): Boolean {
+    val um = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+    return um.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,9 +181,40 @@ class MainActivity : ComponentActivity() {
         setContent { SATVApp(base) }
     }
 
+    /** Small pop-up video window so you can use other apps. */
+    fun enterPip() {
+        if (Build.VERSION.SDK_INT < 26) return
+        try {
+            val r = pipRatio.coerceIn(0.45f, 2.3f)
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational((r * 1000).toInt(), 1000))
+                    .build()
+            )
+        } catch (e: Exception) {
+            // not supported on this device
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pipEligible) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPipMode = isInPictureInPictureMode
+    }
+
+    /** TV remote: up/down = change channel (handled before the focus system sees the key). */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && playerKeyHandler?.invoke(event.keyCode) == true) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     private fun loadBundled(): List<Channel> {
         val all = mutableListOf<Channel>()
-        for (file in listOf("bengali-51-channels.m3u", "master.m3u")) {
+        for (file in listOf("curated.m3u", "bengali-51-channels.m3u", "master.m3u")) {
             try {
                 val text = assets.open(file).bufferedReader().use { it.readText() }
                 all += M3uParser.parse(text, PlaylistSource(file, "local://$file", 0))
@@ -230,13 +306,31 @@ private fun SATVApp(bundled: List<Channel>) {
             .filter { it.name.lowercase().trim() !in blocked }
     }
 
+    val scope = rememberCoroutineScope()
+    val checkUpdate: () -> Unit = {
+        scope.launch {
+            val cfg = withContext(Dispatchers.IO) {
+                RemoteSources.loadConfig(context.applicationContext, useCache = false)
+            }
+            if (cfg == null) {
+                Toast.makeText(context, "Could not check for updates. Please check your internet.",
+                    Toast.LENGTH_LONG).show()
+            } else {
+                config = cfg
+                if (cfg.latestVersionCode > BuildConfig.VERSION_CODE) updateDismissed = false
+                else Toast.makeText(context, "You have the latest version (v${BuildConfig.VERSION_NAME}).",
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Accent, background = Bg, surface = Panel,
         onBackground = Color.White, onSurface = Color.White
     )) {
         Crossfade(targetState = splash, animationSpec = tween(600), label = "splash") { isSplash ->
             if (isSplash) SplashScreen()
-            else SATVHome(channels, loading) { reloadKey++ }
+            else SATVHome(channels, loading, onReload = { reloadKey++ }, onCheckUpdate = checkUpdate)
         }
         val cfg = config
         if (!splash && cfg != null && cfg.latestVersionCode > BuildConfig.VERSION_CODE) {
@@ -262,6 +356,7 @@ private fun UpdateDialog(cfg: RemoteConfig, force: Boolean, onLater: () -> Unit)
                     if (cfg.latestVersionName.isNotBlank()) append(" (v${cfg.latestVersionName})")
                     append(" is ready.")
                     if (cfg.notes.isNotBlank()) append("\n\n${cfg.notes}")
+                    if (cfg.apkUrl.isNotBlank()) append("\n\nDownload link:\n${cfg.apkUrl}")
                     if (force) append("\n\nPlease update to keep watching.")
                 }
             )
@@ -272,7 +367,11 @@ private fun UpdateDialog(cfg: RemoteConfig, force: Boolean, onLater: () -> Unit)
                     try {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cfg.apkUrl)))
                     } catch (e: Exception) {
-                        // no browser available
+                        Toast.makeText(
+                            context,
+                            "No browser found. On Android TV open the Downloader app and type:\n${cfg.apkUrl}",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
             }) { Text("Update now") }
@@ -315,7 +414,14 @@ private fun SplashScreen() {
 // ───────────────────────── Home ─────────────────────────
 
 @Composable
-private fun SATVHome(channels: List<Channel>, loading: Boolean, onReload: () -> Unit) {
+private fun SATVHome(
+    channels: List<Channel>,
+    loading: Boolean,
+    onReload: () -> Unit,
+    onCheckUpdate: () -> Unit
+) {
+    val context = LocalContext.current
+    val isTv = remember { isTvDevice(context) }
     var selectedSport by remember { mutableStateOf("Indian Bengali") }
     var searchMode by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
@@ -368,6 +474,7 @@ private fun SATVHome(channels: List<Channel>, loading: Boolean, onReload: () -> 
                             Text("SA-TV", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                             Text("IDEAS. STORIES. IMPACT.", color = Color(0xFFE5B85C),
                                 fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
+                            Text("v${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 10.sp)
                         }
                     }
                 }
@@ -382,7 +489,7 @@ private fun SATVHome(channels: List<Channel>, loading: Boolean, onReload: () -> 
 
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 10.dp),
+                .padding(start = if (isTv) 28.dp else 12.dp, end = 4.dp, top = 12.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             categories.forEach { (name, icon) ->
@@ -410,25 +517,37 @@ private fun SATVHome(channels: List<Channel>, loading: Boolean, onReload: () -> 
                         color = Muted, fontSize = 14.sp
                     )
                 }
+                Spacer(Modifier.height(16.dp))
+                VersionFooter(onCheckUpdate)
             }
         } else {
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 340.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = if (isTv) 32.dp else 10.dp, vertical = 4.dp)
             ) {
-                item {
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         "${shown.size} ${if (selectedSport == "FM Radio") "STATIONS" else "CHANNELS"}",
                         color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 4.dp)
                     )
                 }
-                items(shown, key = { it.url }, contentType = { "channel" }) { channel ->
+                gridItems(shown, key = { it.url }, contentType = { "channel" }) { channel ->
                     ChannelCard(channel, false) { playingChannel = channel }
                 }
-                item { Spacer(Modifier.navigationBarsPadding().height(12.dp)) }
+                item(span = { GridItemSpan(maxLineSpan) }) { VersionFooter(onCheckUpdate) }
+                item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.navigationBarsPadding().height(12.dp)) }
             }
         }
+    }
+}
+
+@Composable
+private fun VersionFooter(onCheck: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("SA-TV  v${BuildConfig.VERSION_NAME}  (build ${BuildConfig.VERSION_CODE})", color = Muted, fontSize = 11.sp)
+        TextButton(onClick = onCheck) { Text("Check for updates", color = Accent, fontSize = 13.sp) }
     }
 }
 
@@ -441,12 +560,15 @@ private fun HeaderAction(symbol: String, onClick: () -> Unit) {
 
 @Composable
 private fun CategoryChip(icon: String, label: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = if (selected) Color(0xFF172D3D) else Panel,
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Accent else PanelAlt),
-        modifier = Modifier.padding(end = 8.dp)
+        color = if (selected || focused) Color(0xFF172D3D) else Panel,
+        border = androidx.compose.foundation.BorderStroke(
+            if (focused) 3.dp else 1.dp, if (selected || focused) Accent else PanelAlt
+        ),
+        modifier = Modifier.padding(end = 8.dp).onFocusChanged { focused = it.hasFocus }
     ) {
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -467,11 +589,18 @@ private fun CategoryChip(icon: String, label: String, count: Int, selected: Bool
 @Composable
 private fun ChannelCard(channel: Channel, highlight: Boolean, onClick: () -> Unit) {
     val emoji = categoryEmoji(channelCategory(channel))
+    var focused by remember { mutableStateOf(false) }
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 3.dp)
+            .onFocusChanged { focused = it.hasFocus }
+            .clickable { onClick() },
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = if (highlight) Color(0xFF173043) else Panel),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (highlight) Accent else Color(0xFF293A52))
+        colors = CardDefaults.cardColors(
+            containerColor = if (focused) Color(0xFF223652) else if (highlight) Color(0xFF173043) else Panel
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            if (focused) 3.dp else 1.dp, if (highlight || focused) Accent else Color(0xFF293A52)
+        )
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
@@ -528,16 +657,9 @@ private fun LivePlayerScreen(
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
-    val exoPlayer = remember {
-        val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setUserAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context).setDataSourceFactory(http)
-            )
-            .build()
-    }
+    // One shared player: it also lives in PlaybackService so audio keeps playing with the screen locked
+    val exoPlayer = remember { Playback.get(context) }
+    val isTv = remember { isTvDevice(context) }
 
     var current by remember { mutableStateOf(initialChannel) }
     var attempt by remember { mutableStateOf(0) }
@@ -556,6 +678,11 @@ private fun LivePlayerScreen(
     var gKind by remember { mutableStateOf(0) } // 0 none, 1 volume, 2 brightness
     var gValue by remember { mutableStateOf(0f) }
     var gTick by remember { mutableStateOf(0) }
+    var qualities by remember { mutableStateOf<List<QualityOption>>(emptyList()) }
+    var quality by remember { mutableStateOf(0) } // 0 = Auto
+    var qualityOpen by remember { mutableStateOf(false) }
+    var playingHeight by remember { mutableStateOf(0) }
+    val playFocus = remember { FocusRequester() }
 
     val isRadio = current.group == "FM Radio"
     val index = channels.indexOfFirst { it.url == current.url }.coerceAtLeast(0)
@@ -591,6 +718,13 @@ private fun LivePlayerScreen(
             0.5f
         }
     }
+    fun applyQuality(opt: QualityOption?) {
+        val b = exoPlayer.trackSelectionParameters.buildUpon()
+        if (opt == null) b.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        else b.setOverrideForType(TrackSelectionOverride(opt.group, opt.index))
+        exoPlayer.trackSelectionParameters = b.build()
+        quality = opt?.height ?: 0
+    }
     fun lockScreen(on: Boolean) {
         locked = on
         controlsVisible = false
@@ -604,8 +738,25 @@ private fun LivePlayerScreen(
         buffering = true
         videoRatio = 0f
         val links = listOf(current.url) + current.backupUrls
+        quality = 0
+        qualities = emptyList()
+        playingHeight = 0
         try {
-            exoPlayer.setMediaItem(MediaItem.fromUri(links.getOrElse(attempt) { current.url }))
+            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+            val meta = MediaMetadata.Builder()
+                .setTitle(current.name)
+                .setArtist(if (current.group == "FM Radio") "SA-TV Radio" else "SA-TV Live")
+                .apply {
+                    current.logo?.takeIf { it.isNotBlank() }?.let { setArtworkUri(Uri.parse(it)) }
+                }
+                .build()
+            exoPlayer.setMediaItem(
+                MediaItem.Builder()
+                    .setUri(links.getOrElse(attempt) { current.url })
+                    .setMediaMetadata(meta)
+                    .build()
+            )
             exoPlayer.volume = if (muted) 0f else 1f
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
@@ -635,14 +786,82 @@ private fun LivePlayerScreen(
                 playing = playWhenReady
             }
             override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                if (videoSize.width > 0 && videoSize.height > 0)
+                if (videoSize.width > 0 && videoSize.height > 0) {
                     videoRatio = videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
+                    playingHeight = videoSize.height
+                }
+            }
+            override fun onTracksChanged(tracks: Tracks) {
+                val found = LinkedHashMap<Int, QualityOption>()
+                for (g in tracks.groups) {
+                    if (g.type != C.TRACK_TYPE_VIDEO) continue
+                    for (i in 0 until g.length) {
+                        if (!g.isTrackSupported(i)) continue
+                        val f = g.getTrackFormat(i)
+                        if (f.height <= 0) continue
+                        val old = found[f.height]
+                        if (old == null || f.bitrate > old.bitrate) {
+                            found[f.height] = QualityOption(f.height, f.bitrate, g.mediaTrackGroup, i)
+                        }
+                    }
+                }
+                qualities = found.values.sortedByDescending { it.height }
             }
         }
         exoPlayer.addListener(listener)
         onDispose {
             exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            context.stopService(Intent(context, PlaybackService::class.java))
+        }
+    }
+
+    // connect to the media session: lock-screen / notification controls + background audio
+    DisposableEffect(Unit) {
+        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val future = MediaController.Builder(context, token).buildAsync()
+        onDispose { MediaController.releaseFuture(future) }
+    }
+    LaunchedEffect(isRadio) {
+        if (isRadio && !isTv && Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
+    }
+
+    // pop-up window + TV remote
+    SideEffect {
+        pipEligible = !isRadio && !isTv && errorText == null
+        if (videoRatio > 0f) pipRatio = videoRatio
+    }
+    DisposableEffect(Unit) { onDispose { pipEligible = false } }
+
+    val onKey = rememberUpdatedState<(Int) -> Boolean> { code ->
+        val free = !locked && !qualityOpen && !inPipMode
+        when (code) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_NEXT ->
+                if (free) { step(1); true } else false
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS ->
+                if (free) { step(-1); true } else false
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE ->
+                if (free) { togglePlay(); true } else false
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT ->
+                if (free && !controlsVisible) { controlsVisible = true; controlsTick++; true } else false
+            else -> false
+        }
+    }
+    DisposableEffect(Unit) {
+        playerKeyHandler = { code -> onKey.value(code) }
+        onDispose { playerKeyHandler = null }
+    }
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible && isTv) {
+            delay(150)
+            try { playFocus.requestFocus() } catch (e: Exception) { /* controls not on screen yet */ }
         }
     }
 
@@ -651,8 +870,10 @@ private fun LivePlayerScreen(
         var wasPlaying = false
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                wasPlaying = exoPlayer.playWhenReady
-                exoPlayer.pause()
+                if (latest.value.group != "FM Radio") { // radio keeps playing with the screen locked
+                    wasPlaying = exoPlayer.playWhenReady
+                    exoPlayer.pause()
+                }
             } else if (event == Lifecycle.Event.ON_START && wasPlaying) {
                 exoPlayer.play()
             }
@@ -687,8 +908,8 @@ private fun LivePlayerScreen(
     }
 
     // auto-hide controls / indicators / lock hint
-    LaunchedEffect(controlsVisible, controlsTick, playing) {
-        if (controlsVisible && playing) {
+    LaunchedEffect(controlsVisible, controlsTick, playing, qualityOpen) {
+        if (controlsVisible && playing && !qualityOpen) {
             delay(4000)
             controlsVisible = false
         }
@@ -844,6 +1065,12 @@ private fun LivePlayerScreen(
                                 GlyphIcon("unlock", Modifier.size(22.dp))
                             }
                             Spacer(Modifier.width(8.dp))
+                            if (!isRadio && !isTv && Build.VERSION.SDK_INT >= 26) {
+                                CircleBtn(40.dp, Glass, onClick = { (activity as MainActivity).enterPip() }) {
+                                    GlyphIcon("pip", Modifier.size(22.dp))
+                                }
+                                Spacer(Modifier.width(8.dp))
+                            }
                             CircleBtn(40.dp, Glass, onClick = {
                                 muted = !muted
                                 exoPlayer.volume = if (muted) 0f else 1f
@@ -859,7 +1086,7 @@ private fun LivePlayerScreen(
                             CircleBtn(48.dp, Glass, onClick = { step(-1) }) {
                                 GlyphIcon("prev", Modifier.size(26.dp))
                             }
-                            CircleBtn(70.dp, Accent, onClick = { togglePlay() }) {
+                            CircleBtn(70.dp, Accent, onClick = { togglePlay() }, modifier = Modifier.focusRequester(playFocus)) {
                                 GlyphIcon(if (playing) "pause" else "play", Modifier.size(38.dp))
                             }
                             CircleBtn(48.dp, Glass, onClick = { step(1) }) {
@@ -884,6 +1111,40 @@ private fun LivePlayerScreen(
                             Text("${index + 1} / ${channels.size}", color = Color(0xFFCBD5E1), fontSize = 12.sp)
                             Spacer(Modifier.weight(1f))
                             if (!isRadio) {
+                                Box {
+                                    Surface(
+                                        onClick = { qualityOpen = true },
+                                        shape = RoundedCornerShape(50),
+                                        color = Glass
+                                    ) {
+                                        Text(
+                                            if (quality == 0) {
+                                                if (playingHeight > 0) "AUTO · ${qLabel(playingHeight)}" else "AUTO"
+                                            } else qLabel(quality),
+                                            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                        )
+                                    }
+                                    DropdownMenu(expanded = qualityOpen, onDismissRequest = { qualityOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text(if (quality == 0) "✓  Auto" else "Auto") },
+                                            onClick = { applyQuality(null); qualityOpen = false }
+                                        )
+                                        qualities.forEach { q ->
+                                            DropdownMenuItem(
+                                                text = { Text((if (quality == q.height) "✓  " else "") + qLabel(q.height)) },
+                                                onClick = { applyQuality(q); qualityOpen = false }
+                                            )
+                                        }
+                                        if (qualities.size < 2) {
+                                            DropdownMenuItem(
+                                                text = { Text("This stream has only one quality", color = Muted, fontSize = 12.sp) },
+                                                onClick = { qualityOpen = false }
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.width(10.dp))
                                 Surface(
                                     onClick = { fitMode = (fitMode + 1) % 3; controlsTick++ },
                                     shape = RoundedCornerShape(50),
@@ -923,6 +1184,14 @@ private fun LivePlayerScreen(
         }
     }
 
+    if (inPipMode) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            if (isRadio) RadioArt(current.name, playing)
+            else VideoSurface(exoPlayer, 0, videoRatio, Modifier.fillMaxSize())
+        }
+        return
+    }
+
     if (landscape) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             stage(Modifier.fillMaxSize())
@@ -944,7 +1213,7 @@ private fun LivePlayerScreen(
                 Text("⚑  Report broken channel", color = Accent, fontSize = 12.sp,
                     modifier = Modifier.clickable { reportBroken(context, current) }.padding(top = 8.dp, bottom = 2.dp))
                 Spacer(Modifier.height(4.dp))
-                Text("Swipe up/down: left side = brightness, right side = volume  •  Double-tap = play/pause",
+                Text("Swipe up/down: left side = brightness, right side = volume  •  Double-tap = play/pause  •  TV remote: Up/Down = change channel",
                     color = Muted, fontSize = 10.sp)
             }
             Text(
@@ -1068,10 +1337,15 @@ private fun CircleBtn(
     size: androidx.compose.ui.unit.Dp,
     bg: Color,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
+    var focused by remember { mutableStateOf(false) }
     Box(
-        Modifier.size(size).clip(CircleShape).background(bg).clickable { onClick() },
+        modifier.size(size).clip(CircleShape).background(bg)
+            .then(if (focused) Modifier.border(3.dp, Accent, CircleShape) else Modifier)
+            .onFocusChanged { focused = it.hasFocus }
+            .clickable { onClick() },
         contentAlignment = Alignment.Center,
         content = content
     )
@@ -1164,6 +1438,12 @@ private fun GlyphIcon(kind: String, modifier: Modifier = Modifier, color: Color 
                         sw, StrokeCap.Round
                     )
                 }
+            }
+            "pip" -> {
+                drawRoundRect(color, Offset(w * .12f, h * .2f), Size(w * .76f, h * .6f),
+                    CornerRadius(w * .06f, w * .06f), style = Stroke(sw))
+                drawRoundRect(color, Offset(w * .48f, h * .48f), Size(w * .3f, h * .22f),
+                    CornerRadius(w * .03f, w * .03f))
             }
             "lock" -> {
                 drawArc(color, 180f, 180f, false, Offset(w * .32f, h * .14f), Size(w * .36f, h * .5f),

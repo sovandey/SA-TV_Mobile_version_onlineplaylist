@@ -71,3 +71,42 @@ Note: Android-e "unknown source" install-er permission user ke dite hobe (protho
 - GitHub server USA-te. India/Bangladesh-only channel oikhan theke "dead" dekhte pare, tai amra **kokhono channel auto-delete ba hide kori na** – shudhu STATUS.md-e dekhai. Remove korar siddhanto tomar.
 - Report button-e user-er GitHub account lagbe. Account chhara report-er jonno alada server lagbe (Google Form / Telegram bot) – pore korte pari.
 - Public repo-te playlist shobai dekhte pabe.
+
+---
+
+## 5. Update option kaj korche ki na – kibhabe check korbe
+
+**Sohoj test (APK banate hobe na):**
+1. App-er ekdom niche **"SA-TV v1.0.N (build N) – Check for updates"** ache. Version number header-eo (SA-TV-r niche) dekha jay.
+2. GitHub-e `playlist/config.json` kholo, ✏️ edit kore likho:
+   `"latestVersionCode": 999, "latestVersionName": "9.9.9", "apkUrl": "https://example.com/test.apk", "notes": "test"`
+   → Commit. 5 minute opekkha koro (GitHub cache).
+3. App-e **Check for updates** chaplei popup ashbe: **"Update available"**. Test shesh hole config.json ager moto (`1`) kore dao.
+4. Update na thakle app likhe dekhay: **"You have the latest version"**.
+
+**Asol test:**
+1. Build #N APK install koro (phone-e).
+2. Kono ekta choto change kore **Run workflow → publish ✔** chalao (build #N+1 hobe).
+3. Purano app (#N) khulo → popup ashbe → **Update now** → APK nambe → install. Install-er por version number #N+1 dekhabe.
+
+---
+
+## 6. Android TV-te install kora
+
+1. TV-r Play Store theke **Downloader** (by AFTVnews) app install koro.
+2. TV **Settings → Apps → Security & restrictions → Install unknown apps → Downloader → ON**.
+3. Downloader khule URL box-e likho (tomar repo-r nam diye):
+   `https://github.com/OWNER/REPO/releases/latest/download/SA-TV.apk`
+   → **Go** → download hole **Install**. (Age ekbar **publish ✔** diye release banate hobe.)
+   Onno upay: pen drive-e `SA-TV.apk` rekhe TV-r file manager diye install, ba "Send Files to TV" app.
+4. SA-TV TV-r app list-e banner soho dekhabe.
+
+**TV remote:**
+- **Up** = porer channel, **Down** = ager channel (CH+ / CH- button-o kaj kore)
+- **OK** = controls dekhao / play-pause, **Left/Right** = button-e jao, **Back** = bahire
+- Home screen-e arrow key diye category ar channel select kore **OK** chaplei chole.
+
+## 7. Notun ja ja ache (ei version)
+- Lock screen / screen off holeo **FM radio chole** (notification-e play/pause dekhay). TV channel screen lock-e pause hoy.
+- Video **resolution** menu (AUTO, 1080p, 720p…): stream ja ja quality dey shudhu setai dekhabe.
+- **Pop-up video (PiP)**: player-er upor-e pop-up button, ba Home chaple video chhoto window-e chole.

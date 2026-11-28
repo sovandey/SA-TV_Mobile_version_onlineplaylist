@@ -8,15 +8,3 @@ Master playlist: `app/src/main/assets/master.m3u`
 Remote URL: `https://raw.githubusercontent.com/sovandey/bengal-iptv-data/main/bengali_merged.m3u`
 
 Build with AndroidIDE or Android Studio, JDK 17 and a compatible Android SDK/Gradle setup. Only use streams you are authorized to access.
-
-⚠️ Legal Notice
-This project hosts NO STREAMING CONTENT
-All links are public sources
-Educational Purpose Only 🎓
-Any copyright objection → Immediate removal
-Respect Content Owners ❤️
-
-📌Notice
-This project is specifically for my use. Don't Download It 
-
-
