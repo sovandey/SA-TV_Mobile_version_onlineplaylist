@@ -2,18 +2,29 @@ name: SA-TV Android APK Build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish this build as a new update for all users?"
+        type: boolean
+        default: false
+      notes:
+        description: "What is new (shown to users in the update popup)"
+        type: string
+        default: ""
   push:
     branches: [ main, master ]
-    paths:
-      - "**"
-      - ".github/workflows/build.yml"
+    paths-ignore:
+      - "playlist/**"
+      - "tools/**"
+      - "**.md"
+      - ".github/workflows/check-channels.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
-    name: Build SA-TV Debug APK
+    name: Build SA-TV APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -36,13 +47,47 @@ jobs:
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/satv-release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/satv-release.jks" >> "$GITHUB_ENV"
+            echo "Using your permanent signing key."
+          else
+            echo "::warning::KEYSTORE_BASE64 secret not set. APK is signed with a temporary key, so users could NOT install it as an update over an older version. See UPDATE-GUIDE.md."
+          fi
+
+      - name: Build APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          gradle --no-daemon :app:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk SA-TV.apk
 
       - name: Upload SA-TV APK
         uses: actions/upload-artifact@v4
         with:
-          name: SA-TV-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: SA-TV-apk
+          path: SA-TV.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Publish update for all users
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.notes }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_number }}
+        run: |
+          TAG="v2.0.$RUN"
+          gh release create "$TAG" SA-TV.apk --title "SA-TV $TAG" --notes "${NOTES:-SA-TV update}"
+          python3 tools/update_config.py "$((2000 + RUN))" "$TAG" "$REPO" "$NOTES"
+          git config user.name "satv-bot"
+          git config user.email "satv-bot@users.noreply.github.com"
+          git add playlist/config.json
+          git commit -m "Release $TAG [skip ci]"
+          git push
