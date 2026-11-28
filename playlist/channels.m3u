@@ -237,7 +237,7 @@ http://alvetv.com/moviebanglatv/8080/index.m3u8
 https://d3qs3d2rkhfqrt.cloudfront.net/out/v1/40492a64c1db4a1385ba1a397d357d3a/index.m3u8
 #EXTINF:-1 tvg-id="ZBCartoon.in" group-title="Kids",ZB Cartoon
 https://server.zillarbarta.com/zbcatun/video.m3u8
-#EXTINF:-1 tvg-id="Sonar Bangla.in" group-title="indian Bengali",Sonar Bangla
+#EXTINF:-1 tvg-id="Sonar Bangla.in" group-title="Indian Bengali",Sonar Bangla
 https://samitaorigin.tangotv.in/SONARBANGLA/SAMITAORIGIN/index.m3u8
 
 #EXTINF:-1 tvg-id="sony-ten-1" tvg-name="Sony Sports Ten 1" tvg-language="English" tvg-logo="https://www.sonypicturesnetworks.com/images/logos/SONY_SportsTen1_SD_Logo_CLR.png" group-title="Sports" group-logo="https://www.sonypicturesnetworks.com/images/logos/Sony_LIV.png", Sony Sports Ten 1
@@ -260,3 +260,14 @@ https://sliv.tgaadi.workers.dev/ten3hd.m3u8
 https://sliv.tgaadi.workers.dev/ten4hd.m3u8
 #EXTINF:-1 tvg-id="sony-ten-5-hd" tvg-name="Sony Sports Ten 5 HD" tvg-language="English" tvg-logo="https://www.sonypicturesnetworks.com/images/logos/SONY_SportsTen5_HD_Logo_CLR.png" group-title="Sports" group-logo="https://www.sonypicturesnetworks.com/images/logos/Sony_LIV.png", Sony Sports Ten 5 HD
 https://sliv.tgaadi.workers.dev/sonysixhd.m3u8
+
+#EXTINF:-1 group-title="FM Radio",Radio Mirchi 98.3
+https://eu8.fastcast4u.com/proxy/clyedupq?mp=%2F1
+#EXTINF:-1 group-title="FM Radio",BIG FM 92.7
+https://stream.zeno.fm/dbstwo3dvhhtv
+#EXTINF:-1 group-title="FM Radio",RED FM 93.5
+https://funasia.streamguys1.com/live9
+#EXTINF:-1 group-title="FM Radio",Fever 104 FM
+https://radio.canstream.co.uk:8115/live.mp3
+#EXTINF:-1 group-title="FM Radio",Friends FM 91.9
+http://gir.fm/?play=kol/1078

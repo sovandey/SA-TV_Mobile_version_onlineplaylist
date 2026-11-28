@@ -11,8 +11,8 @@ android {
         minSdk = 23
         targetSdk = 35
         val buildNumber = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionCode = buildNumber
-        versionName = "1.0.$buildNumber"
+        versionCode = 2000 + buildNumber
+        versionName = "2.0.$buildNumber"
         // "owner/repo" of your GitHub repository. On GitHub Actions this is filled in automatically.
         val repo = System.getenv("GITHUB_REPOSITORY") ?: "OWNER/SA-TV"
         buildConfigField("String", "REPO", "\"$repo\"")

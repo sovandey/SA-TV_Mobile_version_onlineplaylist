@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -18,9 +19,15 @@ object Playback {
         val app = context.applicationContext
         val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
         val p = ExoPlayer.Builder(app)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(app).setDataSourceFactory(http))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(app)
+                    .setDataSourceFactory(http)
+                    .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

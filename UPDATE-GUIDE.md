@@ -110,3 +110,17 @@ Note: Android-e "unknown source" install-er permission user ke dite hobe (protho
 - Lock screen / screen off holeo **FM radio chole** (notification-e play/pause dekhay). TV channel screen lock-e pause hoy.
 - Video **resolution** menu (AUTO, 1080p, 720p…): stream ja ja quality dey shudhu setai dekhabe.
 - **Pop-up video (PiP)**: player-er upor-e pop-up button, ba Home chaple video chhoto window-e chole.
+
+## 8. Android TV UI, logo ar stream error (notun)
+- TV te ekhon bam dike category menu, dan dike channel grid. D-pad diye ghure OK chaple chole.
+- TV te video sobsomoy full screen. Dekhar somoy Up = porer channel, Down = ager channel. OK/Left/Right chaple controls ashe, Back chaple ferot.
+- Logo kalo hoto karon launcher icon JPG chhilo. Ekhon PNG icon + TV banner deya hoyeche. Purono app uninstall kore notun APK install koro, na hole TV launcher purono icon cache rakhe.
+- "This stream is not available right now" ager moto ar sathe sathe ashbe na: app ekhon 3 bar nijei retry kore, live-window theke pichiye gele live e fire ashe, tarpor backup link try kore, tarpor-i error dekhay. Stream chalu hole error nijei sore jay.
+- Tomar playlist (channels.m3u) use kora hoyeche. "indian Bengali" ke "Indian Bengali" kora hoyeche (app ekhon boro/choto hater akhor niye matha ghamay na).
+
+## 9. Version 2 ar update test (notun)
+- App ekhon **v2.0.N** (versionCode = 2000 + N). Ager sob build (code < 2000) notun release dekhle update dialog dekhabe.
+- Test: (1) Ager Fixed9 build ba onno purano APK phone/TV te thakuk. (2) Actions -> Build -> Run workflow -> publish = true. (3) Purano app khule "Check for updates" chaple (ba restart) update dialog ashbe. Notun APK download kore install korle v2 hoye jabe.
+- Notun v2 APK sorasori install korle ar update dekhabe na (karon ota-i latest).
+- Logo: adaptive full-bleed icon + Android 12 splash er logo/background fix kora hoyeche.
+- TV te Back chaple sorasori channel list e fire jay.

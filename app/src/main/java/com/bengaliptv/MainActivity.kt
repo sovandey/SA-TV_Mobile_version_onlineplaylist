@@ -29,6 +29,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
@@ -230,7 +231,7 @@ class MainActivity : ComponentActivity() {
 
 private fun channelCategory(channel: Channel): String? {
     val group = channel.group.orEmpty()
-    if (categories.any { it.first == group }) return group
+    categories.firstOrNull { it.first.equals(group, ignoreCase = true) }?.let { return it.first }
     val id = channel.id.orEmpty().lowercase()
     val country = channel.country.orEmpty().uppercase()
     val name = channel.name.lowercase()
@@ -398,7 +399,7 @@ private fun reportBroken(context: Context, channel: Channel) {
 private fun SplashScreen() {
     val scale = remember { Animatable(0.9f) }
     LaunchedEffect(Unit) { scale.animateTo(1f, tween(1500)) }
-    Box(Modifier.fillMaxSize().background(Color(0xFF0B0F18)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF0D0F14)), contentAlignment = Alignment.Center) {
         Image(
             painter = painterResource(id = R.drawable.satv_logo),
             contentDescription = "SA-TV",
@@ -441,6 +442,20 @@ private fun SATVHome(
             initialChannel = current,
             onBack = { playingChannel = null },
             onChannelChanged = { playingChannel = it }
+        )
+        return
+    }
+
+    if (isTv) {
+        TvHome(
+            categoryList = categoryList,
+            counts = counts,
+            selected = selectedSport,
+            onSelect = { selectedSport = it },
+            loading = loading,
+            onPlay = { playingChannel = it },
+            onReload = onReload,
+            onCheckUpdate = onCheckUpdate
         )
         return
     }
@@ -540,6 +555,200 @@ private fun SATVHome(
                 item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.navigationBarsPadding().height(12.dp)) }
             }
         }
+    }
+}
+
+// ───────────────────────── Android TV home ─────────────────────────
+
+@Composable
+private fun TvHome(
+    categoryList: List<Channel>,
+    counts: Map<String, Int>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    loading: Boolean,
+    onPlay: (Channel) -> Unit,
+    onReload: () -> Unit,
+    onCheckUpdate: () -> Unit
+) {
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(300)
+        try { firstFocus.requestFocus() } catch (e: Exception) { /* screen not ready yet */ }
+    }
+    Row(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color(0xFF0B1220), Bg)))) {
+        // left menu
+        Column(
+            Modifier.width(300.dp).fillMaxHeight().background(Color(0xFF0B1220))
+                .padding(horizontal = 20.dp, vertical = 28.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = R.drawable.satv_logo),
+                    contentDescription = "SA-TV",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(60.dp).clip(RoundedCornerShape(14.dp))
+                )
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text("SA-TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text("v${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            categories.forEachIndexed { i, (name, icon) ->
+                TvNavItem(
+                    icon = icon, label = name, count = counts[name], selected = name == selected,
+                    onFocus = { onSelect(name) },
+                    modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                    onClick = { onSelect(name) }
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            TvNavItem("⟳", "Reload channels", null, false, onFocus = { }, onClick = onReload)
+            Spacer(Modifier.height(6.dp))
+            TvNavItem("⬆", "Check for updates", null, false, onFocus = { }, onClick = onCheckUpdate)
+        }
+
+        // channels
+        Column(
+            Modifier.weight(1f).fillMaxHeight().padding(start = 32.dp, end = 32.dp, top = 28.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(selected, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "${categoryList.size} ${if (selected == "FM Radio") "stations" else "channels"}",
+                    color = Muted, fontSize = 16.sp, modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+            Text(
+                "Arrow keys: move    OK: play    Up / Down while watching: change channel",
+                color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+            )
+            if (categoryList.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (loading) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Accent)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Loading channels…", color = Muted, fontSize = 16.sp)
+                        }
+                    } else {
+                        Text("No channels in this category yet.", color = Muted, fontSize = 16.sp)
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 230.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 36.dp)
+                ) {
+                    gridItems(categoryList, key = { it.url }, contentType = { "tile" }) { ch ->
+                        TvChannelTile(ch) { onPlay(ch) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvNavItem(
+    icon: String,
+    label: String,
+    count: Int?,
+    selected: Boolean,
+    onFocus: () -> Unit,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(if (focused) Color(0xFF1B3A52) else if (selected) Color(0xFF14283A) else Color.Transparent)
+            .then(if (focused) Modifier.border(3.dp, Accent, RoundedCornerShape(14.dp)) else Modifier)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocus()
+            }
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(icon, fontSize = 20.sp)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            label, color = Color.White, fontSize = 17.sp, maxLines = 1,
+            fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        if (count != null) {
+            Text("$count", color = if (focused) Accent else Muted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun TvChannelTile(channel: Channel, onClick: () -> Unit) {
+    val emoji = categoryEmoji(channelCategory(channel))
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (focused) 1.07f else 1f, label = "tile")
+    Column(
+        Modifier.padding(8.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (focused) Color(0xFF223652) else Panel)
+            .then(
+                if (focused) Modifier.border(3.dp, Accent, RoundedCornerShape(16.dp))
+                else Modifier.border(1.dp, Color(0xFF293A52), RoundedCornerShape(16.dp))
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable { onClick() }
+    ) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color(0xFFEEF2F7)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (channel.logo.isNullOrBlank()) {
+                Text(emoji, fontSize = 40.sp)
+            } else {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(channel.logo).size(256).build(),
+                    contentDescription = channel.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(14.dp),
+                    loading = { Text(emoji, fontSize = 40.sp) },
+                    error = { Text(emoji, fontSize = 40.sp) }
+                )
+            }
+        }
+        Text(
+            channel.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
+        )
+    }
+}
+
+@Composable
+private fun Pill(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (focused) Accent else Glass,
+        modifier = modifier.onFocusChanged { focused = it.hasFocus }
+    ) {
+        Text(
+            text, color = if (focused) Color.Black else Color.White, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+        )
     }
 }
 
@@ -654,12 +863,13 @@ private fun LivePlayerScreen(
     val context = LocalContext.current
     val activity = context as Activity
     val view = LocalView.current
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isTv = remember { isTvDevice(context) }
+    // a TV is always full screen
+    val landscape = isTv || LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
     // One shared player: it also lives in PlaybackService so audio keeps playing with the screen locked
     val exoPlayer = remember { Playback.get(context) }
-    val isTv = remember { isTvDevice(context) }
 
     var current by remember { mutableStateOf(initialChannel) }
     var attempt by remember { mutableStateOf(0) }
@@ -682,6 +892,7 @@ private fun LivePlayerScreen(
     var quality by remember { mutableStateOf(0) } // 0 = Auto
     var qualityOpen by remember { mutableStateOf(false) }
     var playingHeight by remember { mutableStateOf(0) }
+    var retryCount by remember { mutableStateOf(0) }
     val playFocus = remember { FocusRequester() }
 
     val isRadio = current.group == "FM Radio"
@@ -735,6 +946,7 @@ private fun LivePlayerScreen(
     // stream loading
     LaunchedEffect(current.url, attempt) {
         errorText = null
+        retryCount = 0
         buffering = true
         videoRatio = 0f
         val links = listOf(current.url) + current.backupUrls
@@ -770,6 +982,25 @@ private fun LivePlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val ch = latest.value
+                // live stream fell behind: jump to the live edge and go on (not a real error)
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    exoPlayer.seekToDefaultPosition()
+                    exoPlayer.prepare()
+                    return
+                }
+                // short network hiccup: try the same link again a few times before giving up
+                if (retryCount < 3) {
+                    retryCount++
+                    val urlNow = ch.url
+                    view.postDelayed({
+                        if (latest.value.url == urlNow && exoPlayer.playerError != null) {
+                            exoPlayer.prepare()
+                            exoPlayer.playWhenReady = true
+                        }
+                    }, 1500L * retryCount)
+                    return
+                }
+                retryCount = 0
                 if (attempt + 1 < 1 + ch.backupUrls.size) {
                     attempt++ // try the backup link automatically
                     return
@@ -778,9 +1009,18 @@ private fun LivePlayerScreen(
                 buffering = false
                 controlsVisible = true
             }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    errorText = null
+                    retryCount = 0
+                }
+            }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) errorText = null
+                if (state == Player.STATE_READY) {
+                    errorText = null
+                    retryCount = 0
+                }
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 playing = playWhenReady
@@ -839,9 +1079,15 @@ private fun LivePlayerScreen(
     }
     DisposableEffect(Unit) { onDispose { pipEligible = false } }
 
+    val backNow = rememberUpdatedState(onBack)
     val onKey = rememberUpdatedState<(Int) -> Boolean> { code ->
         val free = !locked && !qualityOpen && !inPipMode
         when (code) {
+            // Back on the remote: straight to the channel list
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE ->
+                if (inPipMode || qualityOpen) false
+                else if (locked) { lockHint = true; lockTick++; true }
+                else { backNow.value(); true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_NEXT ->
                 if (free) { step(1); true } else false
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS ->
@@ -885,10 +1131,10 @@ private fun LivePlayerScreen(
     // screen on + rotation allowed while player is open; restore brightness on exit
     DisposableEffect(Unit) {
         view.keepScreenOn = true
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        if (!isTv) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
         onDispose {
             view.keepScreenOn = false
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (!isTv) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             val lp = activity.window.attributes
             lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             activity.window.attributes = lp
@@ -931,7 +1177,7 @@ private fun LivePlayerScreen(
         if (locked) {
             lockHint = true
             lockTick++
-        } else if (landscape) toggleOrientation() else onBack()
+        } else if (landscape && !isTv) toggleOrientation() else onBack()
     }
 
     val stage: @Composable (Modifier) -> Unit = { mod ->
@@ -1046,7 +1292,28 @@ private fun LivePlayerScreen(
                             .then(if (landscape) Modifier.displayCutoutPadding() else Modifier)
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
+                        // TV: big channel number + name (top left)
+                        if (isTv) {
+                            Row(
+                                Modifier.align(Alignment.TopStart).padding(top = 6.dp, start = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(12.dp)).background(Accent)
+                                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                                ) {
+                                    Text("${index + 1}", color = Color.Black, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.width(16.dp))
+                                Column {
+                                    Text(current.name, color = Color.White, fontSize = 28.sp,
+                                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(channelCategory(current) ?: "", color = Color(0xFFCBD5E1), fontSize = 14.sp)
+                                }
+                            }
+                        }
                         // top bar
+                        if (!isTv) {
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -1077,7 +1344,9 @@ private fun LivePlayerScreen(
                                 controlsTick++
                             }) { GlyphIcon(if (muted) "mute" else "volume", Modifier.size(22.dp)) }
                         }
+                        }
                         // centre controls
+                        if (!isTv) {
                         Row(
                             Modifier.align(Alignment.Center),
                             horizontalArrangement = Arrangement.spacedBy(26.dp),
@@ -1092,6 +1361,7 @@ private fun LivePlayerScreen(
                             CircleBtn(48.dp, Glass, onClick = { step(1) }) {
                                 GlyphIcon("next", Modifier.size(26.dp))
                             }
+                        }
                         }
                         // bottom bar
                         Row(
@@ -1110,21 +1380,22 @@ private fun LivePlayerScreen(
                             Spacer(Modifier.width(10.dp))
                             Text("${index + 1} / ${channels.size}", color = Color(0xFFCBD5E1), fontSize = 12.sp)
                             Spacer(Modifier.weight(1f))
+                            if (isTv) {
+                                Pill(
+                                    if (playing) "❚❚  Pause" else "▶  Play",
+                                    onClick = { togglePlay() },
+                                    modifier = Modifier.focusRequester(playFocus)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                            }
                             if (!isRadio) {
                                 Box {
-                                    Surface(
-                                        onClick = { qualityOpen = true },
-                                        shape = RoundedCornerShape(50),
-                                        color = Glass
-                                    ) {
-                                        Text(
-                                            if (quality == 0) {
-                                                if (playingHeight > 0) "AUTO · ${qLabel(playingHeight)}" else "AUTO"
-                                            } else qLabel(quality),
-                                            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
-                                        )
-                                    }
+                                    Pill(
+                                        if (quality == 0) {
+                                            if (playingHeight > 0) "AUTO · ${qLabel(playingHeight)}" else "AUTO"
+                                        } else qLabel(quality),
+                                        onClick = { qualityOpen = true }
+                                    )
                                     DropdownMenu(expanded = qualityOpen, onDismissRequest = { qualityOpen = false }) {
                                         DropdownMenuItem(
                                             text = { Text(if (quality == 0) "✓  Auto" else "Auto") },
@@ -1145,21 +1416,16 @@ private fun LivePlayerScreen(
                                     }
                                 }
                                 Spacer(Modifier.width(10.dp))
-                                Surface(
-                                    onClick = { fitMode = (fitMode + 1) % 3; controlsTick++ },
-                                    shape = RoundedCornerShape(50),
-                                    color = Glass
-                                ) {
-                                    Text(
-                                        when (fitMode) { 0 -> "FIT"; 1 -> "FILL"; else -> "ZOOM" },
-                                        color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
-                                    )
-                                }
+                                Pill(
+                                    when (fitMode) { 0 -> "FIT"; 1 -> "FILL"; else -> "ZOOM" },
+                                    onClick = { fitMode = (fitMode + 1) % 3; controlsTick++ }
+                                )
                                 Spacer(Modifier.width(10.dp))
                             }
-                            CircleBtn(40.dp, Glass, onClick = { toggleOrientation() }) {
-                                GlyphIcon(if (landscape) "exit" else "full", Modifier.size(22.dp))
+                            if (!isTv) {
+                                CircleBtn(40.dp, Glass, onClick = { toggleOrientation() }) {
+                                    GlyphIcon(if (landscape) "exit" else "full", Modifier.size(22.dp))
+                                }
                             }
                         }
                     }
@@ -1213,7 +1479,7 @@ private fun LivePlayerScreen(
                 Text("⚑  Report broken channel", color = Accent, fontSize = 12.sp,
                     modifier = Modifier.clickable { reportBroken(context, current) }.padding(top = 8.dp, bottom = 2.dp))
                 Spacer(Modifier.height(4.dp))
-                Text("Swipe up/down: left side = brightness, right side = volume  •  Double-tap = play/pause  •  TV remote: Up/Down = change channel",
+                Text("Swipe up/down: left side = brightness, right side = volume  •  Double-tap = play/pause",
                     color = Muted, fontSize = 10.sp)
             }
             Text(

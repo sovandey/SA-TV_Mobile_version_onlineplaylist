@@ -76,12 +76,16 @@ def alive(url):
 
 
 def parse(path):
-    header, entries, pending = [], [], None
+    """Returns (header lines, entries). Your own '# comment' / '##disabled' lines are kept."""
+    header, entries, pending, comments = [], [], None, []
     for raw in open(path, encoding="utf-8").read().splitlines():
         line = raw.strip()
         if line.startswith("#EXTINF"):
             pending = raw
-        elif line.startswith("#") or not line:
+        elif line.startswith("#"):
+            if pending is None:
+                (comments if entries else header).append(raw)
+        elif not line:
             if pending is None and not entries:
                 header.append(raw)
         elif line.startswith("http"):
@@ -90,8 +94,9 @@ def parse(path):
             j = pending.index(",")
             name = pending[j + 1:].strip()
             attrs = dict(re.findall(r'([\w-]+)="([^"]*)"', pending[:j]))
-            entries.append({"extinf": pending, "name": name, "attrs": attrs, "url": line})
-            pending = None
+            entries.append({"extinf": pending, "name": name, "attrs": attrs, "url": line,
+                            "comments": comments})
+            pending, comments = None, []
     return header, entries
 
 
@@ -153,7 +158,7 @@ def main():
                     good = [u for u, ok in zip(cands, ex.map(alive, cands)) if ok]
                 if good:
                     new = dict(grp[0])
-                    new["url"], new["ok"] = good[0], True
+                    new["url"], new["ok"], new["comments"] = good[0], True, []
                     grp = [new] + grp
                     fixed.append(grp[0]["name"])
         if not any(e["ok"] for e in grp):
@@ -167,6 +172,7 @@ def main():
     if lines and lines[-1].strip():
         lines.append("")
     for e in out_entries:
+        lines.extend(e.get("comments", []))
         lines.append(e["extinf"])
         lines.append(e["url"])
     new_text = "\n".join(lines) + "\n"
